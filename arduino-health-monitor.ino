@@ -14,6 +14,8 @@ Andrew McKittrick | 2016
 #include "Adafruit_BluefruitLE_SPI.h"
 #include "Adafruit_BluefruitLE_UART.h"
 #include "Adafruit_BLEGatt.h"
+#include <Wire.h>
+#include "Adafruit_MCP9808.h"
 
 #include "BluefruitConfig.h"
 
@@ -25,6 +27,9 @@ Andrew McKittrick | 2016
 Adafruit_BluefruitLE_SPI ble(BLUEFRUIT_SPI_CS, BLUEFRUIT_SPI_IRQ, BLUEFRUIT_SPI_RST);
 
 Adafruit_BLEGatt gatt(ble);
+
+// Create the MCP9808 temperature sensor object
+Adafruit_MCP9808 tempsensor = Adafruit_MCP9808();
 
 // A small helper
 void error(const __FlashStringHelper*err) {
@@ -52,6 +57,12 @@ void setup(void)
   delay(500);
 
   boolean success;
+  // Make sure the sensor is found, you can also pass in a different i2c
+  // address with tempsensor.begin(0x19) for example
+  if (!tempsensor.begin()) {
+    Serial.println("Couldn't find MCP9808!");
+    while (1);
+  }
 
   Serial.begin(115200);
   Serial.println(F("Health Monitoring System | Andrew McKittrick | 2016"));
@@ -80,13 +91,6 @@ void setup(void)
   Serial.println("Requesting Bluefruit info:");
   /* Print Bluefruit information */
   ble.info();
-
-  /* Change the device name to make it easier to find */
-  Serial.println(F("Setting device name to 'AEM Health Monitor': "));
-
-  if (! ble.sendCommandCheckOK(F("AT+GAPDEVNAME=AEM Health Monitor")) ) {
-    error(F("Could not set device name?"));
-  }
 
   /* Add the Thermometer Service definition */
   /* Service ID should be 1 */
@@ -149,12 +153,16 @@ void setup(void)
 /** Send randomized heart rate data continuously **/
 void loop(void)
 {
-  double temp = random(0, 100) / 10.0;
   int heart_rate = random(50, 100);
 
-  Serial.print(F("Updating Temperature value to "));
-  Serial.print(temp);
-  Serial.println(F(" Fahrenheit"));
+  tempsensor.shutdown_wake(0);   // Don't remove this line! required before reading temp
+  // Read and print out the temperature, then convert to *F
+  float c = tempsensor.readTempC();
+  float f = c * 9.0 / 5.0 + 32.0;
+  f = round(f);
+  int temp = (int) f;
+  
+  delay(250); //This is needed so that the temperature values actually update
 
   // https://developer.bluetooth.org/gatt/characteristics/Pages/CharacteristicViewer.aspx?u=org.bluetooth.characteristic.temperature_measurement.xml
   // Chars value is 1 flag + 4 float value. Tempearature is in Fahrenheit unit
@@ -163,11 +171,10 @@ void loop(void)
   float2IEEE11073(temp, temp_measurement+1);
 
   // TODO temperature is not correct due to Bluetooth use IEEE-11073 format
+  // The temperature only works correctly as an integer, any decimals break it
   gatt.setChar(htsMeasureCharId, temp_measurement, 5);
 
-  Serial.print(F("Updating HRM value to "));
-  Serial.print(heart_rate);
-  Serial.println(F(" BPM"));
+  tempsensor.shutdown_wake(1); // shutdown MSP9808 - power consumption ~0.1 mikro Ampere
 
   /* Command is sent when \n (\r) or println is called */
   /* AT+GATTCHAR=CharacteristicID,value */
@@ -183,5 +190,5 @@ void loop(void)
   }
 
   /* Delay before next measurement update */
-  delay(1000);
+  delay(5000);
 }
